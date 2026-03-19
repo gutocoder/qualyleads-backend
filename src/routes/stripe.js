@@ -1,88 +1,139 @@
-// src/services/stripe.js
-import Stripe from "stripe";
+// src/routes/stripe.js
+import { Router } from "express";
+import { createCheckoutSession, constructWebhookEvent, PLANS } from "../services/stripe.js";
+import supabase from "../services/supabase.js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const router = Router();
 
-// ─── Price IDs (set these after creating products in Stripe dashboard) ────────
-// Create 3 products in Stripe → each with a recurring monthly price
-// Then paste the price IDs here
-export const PLANS = {
-  starter: {
-    name:    "Starter",
-    priceId: process.env.STRIPE_PRICE_STARTER,   // e.g. price_1ABC...
-    amount:  4900,   // €49 in cents
-  },
-  growth: {
-    name:    "Growth",
-    priceId: process.env.STRIPE_PRICE_GROWTH,    // e.g. price_1DEF...
-    amount:  9900,   // €99 in cents
-  },
-  pro: {
-    name:    "Pro",
-    priceId: process.env.STRIPE_PRICE_PRO,       // e.g. price_1GHI...
-    amount:  24900,  // €249 in cents
-  },
-};
+// ─── POST /stripe/create-checkout ─────────────────────────────────────────────
+// Called when user clicks a pricing plan button on the landing page
+router.post("/create-checkout", async (req, res) => {
+  try {
+    const { plan, email } = req.body;
 
-/**
- * Create a Stripe Checkout session with 50% off first month
- */
-export async function createCheckoutSession({ plan, customerEmail, successUrl, cancelUrl }) {
-  const planConfig = PLANS[plan];
-  if (!planConfig) throw new Error(`Unknown plan: ${plan}`);
+    if (!plan || !PLANS[plan]) {
+      return res.status(400).json({ error: `Invalid plan: ${plan}. Must be starter, growth, or pro.` });
+    }
 
-  // Create a 50% off coupon for the first month only
-  // We use a promotion code so Stripe applies it automatically
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    payment_method_types: ["card"],
+    const baseUrl = process.env.APP_URL || "https://qualyleads-landing.netlify.app";
 
-    line_items: [
-      {
-        price: planConfig.priceId,
-        quantity: 1,
-      },
-    ],
-
-    // 50% off first month via Stripe discount
-    discounts: [
-      {
-        coupon: process.env.STRIPE_COUPON_50_OFF, // create this once in Stripe dashboard
-      },
-    ],
-
-    // Pre-fill email if we have it
-    customer_email: customerEmail || undefined,
-
-    // Metadata so we know which plan they picked
-    metadata: {
+    const session = await createCheckoutSession({
       plan,
-      planName: planConfig.name,
-    },
+      customerEmail: email || undefined,
+      successUrl: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}&plan=${plan}`,
+      cancelUrl:  `${baseUrl}/#pricing`,
+    });
 
-    subscription_data: {
-      metadata: {
-        plan,
-        planName: planConfig.name,
-      },
-    },
+    console.log(`💳 Checkout session created: ${plan} → ${session.id}`);
 
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("❌ Checkout error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /stripe/webhook ──────────────────────────────────────────────────────
+// Stripe calls this when payment events happen
+// Must use raw body — do NOT use express.json() for this route
+router.post("/webhook", async (req, res) => {
+  const signature = req.headers["stripe-signature"];
+
+  let event;
+  try {
+    event = constructWebhookEvent(req.body, signature);
+  } catch (err) {
+    console.error("❌ Webhook signature failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  console.log(`📩 Stripe event: ${event.type}`);
+
+  switch (event.type) {
+
+    // ── New subscription created (first payment successful) ──────────────────
+    case "checkout.session.completed": {
+      const session = event.data.object;
+      const { plan, planName } = session.metadata || {};
+      const email    = session.customer_email || session.customer_details?.email;
+      const customerId = session.customer;
+      const subscriptionId = session.subscription;
+
+      console.log(`✅ New subscriber: ${email} → ${planName}`);
+
+      // Save to Supabase subscribers table
+      if (email) {
+        await supabase.from("subscribers").upsert({
+          email,
+          plan,
+          plan_name:       planName,
+          stripe_customer_id:      customerId,
+          stripe_subscription_id:  subscriptionId,
+          status:          "active",
+        }, { onConflict: "email" });
+      }
+      break;
+    }
+
+    // ── Subscription renewed (monthly payment) ───────────────────────────────
+    case "invoice.payment_succeeded": {
+      const invoice = event.data.object;
+      const customerId = invoice.customer;
+
+      await supabase
+        .from("subscribers")
+        .update({ status: "active", updated_at: new Date().toISOString() })
+        .eq("stripe_customer_id", customerId);
+
+      console.log(`🔄 Subscription renewed: ${customerId}`);
+      break;
+    }
+
+    // ── Payment failed ────────────────────────────────────────────────────────
+    case "invoice.payment_failed": {
+      const invoice = event.data.object;
+      const customerId = invoice.customer;
+
+      await supabase
+        .from("subscribers")
+        .update({ status: "past_due" })
+        .eq("stripe_customer_id", customerId);
+
+      console.log(`⚠️ Payment failed: ${customerId}`);
+      break;
+    }
+
+    // ── Subscription cancelled ────────────────────────────────────────────────
+    case "customer.subscription.deleted": {
+      const subscription = event.data.object;
+      const customerId = subscription.customer;
+
+      await supabase
+        .from("subscribers")
+        .update({ status: "cancelled" })
+        .eq("stripe_customer_id", customerId);
+
+      console.log(`❌ Subscription cancelled: ${customerId}`);
+      break;
+    }
+
+    default:
+      console.log(`↩️  Unhandled event: ${event.type}`);
+  }
+
+  res.json({ received: true });
+});
+
+// ─── GET /stripe/plans ─────────────────────────────────────────────────────────
+// Returns available plans (used by landing page)
+router.get("/plans", (req, res) => {
+  res.json({
+    plans: Object.entries(PLANS).map(([key, plan]) => ({
+      id:     key,
+      name:   plan.name,
+      amount: plan.amount,
+    })),
   });
+});
 
-  return session;
-}
-
-/**
- * Construct and verify a Stripe webhook event
- */
-export function constructWebhookEvent(payload, signature) {
-  return stripe.webhooks.constructEvent(
-    payload,
-    signature,
-    process.env.STRIPE_WEBHOOK_SECRET
-  );
-}
-
-export default stripe;
+export default router;
