@@ -4,6 +4,7 @@ import express from "express";
 import webhookRouter from "./routes/webhook.js";
 import smsRouter from "./routes/sms.js";
 import stripeRouter from "./routes/stripe.js";
+import waitlistRouter from "./routes/waitlist.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,6 +48,7 @@ app.use("/webhook", (req, res, next) => {
 app.use("/webhook", webhookRouter);   // POST /webhook/lead
 app.use("/sms", smsRouter);           // POST /sms/reply (Twilio)
 app.use("/stripe", stripeRouter);     // POST /stripe/create-checkout, POST /stripe/webhook
+app.use("/waitlist", waitlistRouter); // POST /waitlist/join, GET /waitlist/count
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", service: "qualyleads" }));
