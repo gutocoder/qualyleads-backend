@@ -13,11 +13,13 @@ const PORT = process.env.PORT || 3000;
 // ── CORS — allow landing page to call the API ──────────────────────────────
 app.use((req, res, next) => {
   const allowed = [
-    process.env.APP_URL,
-    "https://qualyleads-landing.netlify.app",
-    "https://qualyleads-dashboard.netlify.app",
-    "http://localhost:5173",
-  ].filter(Boolean);
+  process.env.APP_URL,
+  "https://app.qualyleads.com",
+  "https://qualyleads.com",
+  "https://qualyleads-landing.netlify.app",
+  "https://qualyleads-dashboard.netlify.app",
+  "http://localhost:5173",
+].filter(Boolean);
 
   const origin = req.headers.origin;
   if (allowed.includes(origin)) {
