@@ -9,7 +9,7 @@ const supabase = createClient(
 /**
  * Save a new lead and their initial AI message to the DB
  */
-export async function saveLead({ name, phone, industry, blueprint, aiMessage }) {
+export async function saveLead({ name, phone, industry, blueprint, aiMessage, clientId }) {
   const { data, error } = await supabase
     .from("leads")
     .insert({
@@ -18,6 +18,7 @@ export async function saveLead({ name, phone, industry, blueprint, aiMessage }) 
       industry,
       blueprint_used: blueprint.industry,
       status: "contacted",
+      ...(clientId ? { client_id: clientId } : {}),
     })
     .select("id")
     .single();
