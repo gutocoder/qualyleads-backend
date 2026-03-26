@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { createCheckoutSession, constructWebhookEvent, PLANS } from "../services/stripe.js";
 import supabase from "../services/supabase.js";
+import { createClientAccount } from "../services/supabaseAdmin.js";
 
 const router = Router();
 
@@ -55,22 +56,41 @@ router.post("/webhook", async (req, res) => {
     case "checkout.session.completed": {
       const session = event.data.object;
       const { plan, planName } = session.metadata || {};
-      const email    = session.customer_email || session.customer_details?.email;
+      const email      = session.customer_email || session.customer_details?.email;
       const customerId = session.customer;
       const subscriptionId = session.subscription;
 
       console.log(`✅ New subscriber: ${email} → ${planName}`);
 
-      // Save to Supabase subscribers table
       if (email) {
+        // 1. Save to subscribers table
         await supabase.from("subscribers").upsert({
           email,
           plan,
-          plan_name:       planName,
-          stripe_customer_id:      customerId,
-          stripe_subscription_id:  subscriptionId,
-          status:          "active",
+          plan_name:              planName,
+          stripe_customer_id:     customerId,
+          stripe_subscription_id: subscriptionId,
+          status:                 "active",
         }, { onConflict: "email" });
+
+        // 2. Create Supabase auth account + send welcome/password setup email
+        try {
+          const { userId, isNew } = await createClientAccount({
+            email,
+            businessName: session.customer_details?.name || email,
+            plan,
+          });
+
+          // 3. Link subscriber to their auth user
+          await supabase.from("subscribers")
+            .update({ user_id: userId })
+            .eq("email", email);
+
+          console.log(`🔐 Auth account ${isNew ? "created" : "already exists"} for ${email}`);
+        } catch (authErr) {
+          // Don't fail the webhook if auth creation fails
+          console.error(`⚠️ Auth creation failed for ${email}:`, authErr.message);
+        }
       }
       break;
     }
