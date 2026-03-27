@@ -3,6 +3,7 @@ import { Router } from "express";
 import { createCheckoutSession, constructWebhookEvent, PLANS } from "../services/stripe.js";
 import supabase from "../services/supabase.js";
 import { createClientAccount } from "../services/supabaseAdmin.js";
+import { sendClientWelcomeEmail } from "../services/loops.js";
 
 const router = Router();
 
@@ -85,6 +86,28 @@ router.post("/webhook", async (req, res) => {
           await supabase.from("subscribers")
             .update({ user_id: userId })
             .eq("email", email);
+
+          // 4. Send welcome email with dashboard + webhook URL
+          const BACKEND_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+            ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+            : "https://web-production-7ffda.up.railway.app";
+
+          // Get client record for webhook URL (may not exist yet if not onboarded)
+          const { data: clientData } = await supabase
+            .from("clients")
+            .select("id")
+            .eq("email", email)
+            .single();
+
+          const webhookUrl = clientData?.id
+            ? `${BACKEND_URL}/zapier/lead?client=${clientData.id}`
+            : `${BACKEND_URL}/zapier/lead`;
+
+          await sendClientWelcomeEmail({
+            email,
+            businessName: session.customer_details?.name || email,
+            webhookUrl,
+          });
 
           console.log(`🔐 Auth account ${isNew ? "created" : "already exists"} for ${email}`);
         } catch (authErr) {
