@@ -2,13 +2,11 @@
 import "dotenv/config";
 import express from "express";
 import webhookRouter from "./routes/webhook.js";
-import smsRouter from "./routes/sms.js";
-import stripeRouter from "./routes/stripe.js";
-import waitlistRouter from "./routes/waitlist.js";
-import zapierRouter from "./routes/zapier.js";
-
-const app = express();
-const PORT = process.env.PORT || 3000;
+// ── Supabase keepalive — prevents free tier pausing ──────────────────────
+setInterval(async () => {
+    await supabase.from("waitlist").select("count");
+    console.log("🟢 Supabase keepalive ping");
+}, 1000 * 60 * 60 * 24 * 3); // every 3 days
 
 // ── CORS — allow landing page to call the API ──────────────────────────────
 app.use((req, res, next) => {
@@ -58,6 +56,15 @@ app.use("/zapier", zapierRouter);     // POST /zapier/lead (public, no auth need
 app.get("/health", (_, res) => res.json({ status: "ok", service: "qualyleads" }));
 
 // ── Start ────────────────────────────────────────────────────────────────────
+
+// ── Supabase keepalive — prevents free tier pausing ──────────────────────
+import { createClient } from "@supabase/supabase-js";
+const _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+setInterval(async () => {
+    await _supabase.from("waitlist").select("count");
+    console.log("🟢 Supabase keepalive ping");
+}, 1000 * 60 * 60 * 24 * 3); // every 3 days
 app.listen(PORT, () => {
   console.log(`
   ╔══════════════════════════════════════╗
