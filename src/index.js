@@ -6,14 +6,10 @@ import smsRouter from "./routes/sms.js";
 import stripeRouter from "./routes/stripe.js";
 import waitlistRouter from "./routes/waitlist.js";
 import zapierRouter from "./routes/zapier.js";
-import { supabase } from "./services/supabase.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-setInterval(async () => {
-  await supabase.from("waitlist").select("count");
-}, 1000 * 60 * 60 * 24 * 3);
 
 app.use((req, res, next) => {
   const allowed = [process.env.APP_URL,"https://app.qualyleads.com","https://qualyleads.com","https://qualyleads-landing.netlify.app","https://qualyleads-dashboard.netlify.app","http://localhost:5173"].filter(Boolean);
