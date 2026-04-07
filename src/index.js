@@ -2,6 +2,7 @@
 import "dotenv/config";
 import express from "express";
 import webhookRouter from "./routes/webhook.js";
+import { supabase } from "./services/supabase.js";
 // ── Supabase keepalive — prevents free tier pausing ──────────────────────
 setInterval(async () => {
     await supabase.from("waitlist").select("count");
