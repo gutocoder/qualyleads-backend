@@ -1,4 +1,4 @@
-// services/twilio.js
+// src/services/twilio.js
 import twilio from "twilio";
 
 const client = twilio(
@@ -8,15 +8,15 @@ const client = twilio(
 
 /**
  * Send an SMS to a lead
+ * Uses Dutch number for NL clients, US number for everyone else
  */
-export async function sendSMS({ to, message }) {
-  const result = await client.messages.create({
-    body: message,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    to,
-  });
+export async function sendSMS({ to, message, language = "en" }) {
+  const from = language === "nl"
+    ? process.env.TWILIO_PHONE_NUMBER_NL
+    : process.env.TWILIO_PHONE_NUMBER_US;
 
-  console.log(`📱 SMS sent to ${to} | SID: ${result.sid}`);
+  const result = await client.messages.create({ body: message, from, to });
+  console.log(`📱 SMS sent to ${to} via ${from} | SID: ${result.sid}`);
   return result.sid;
 }
 
@@ -26,7 +26,6 @@ export async function sendSMS({ to, message }) {
 export function validateTwilioRequest(req) {
   const twilioSignature = req.headers["x-twilio-signature"];
   const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
-
   return twilio.validateRequest(
     process.env.TWILIO_AUTH_TOKEN,
     twilioSignature,
