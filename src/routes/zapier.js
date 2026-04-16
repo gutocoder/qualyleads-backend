@@ -16,6 +16,7 @@ router.post("/lead", async (req, res) => {
     const name = body.name || body.full_name || body.first_name || "there";
     const phone = body.phone || body.phone_number || body.mobile || body.contact_phone;
     const industry = body.industry || body.business_type || body.source || "general";
+    const email = body.email || body.email_address || null;
 
     if (!phone) {
       return res.status(400).json({ error: "Phone number is required" });
@@ -53,7 +54,7 @@ router.post("/lead", async (req, res) => {
     await sendSMS({ to: phone, message: aiMessage, language });
 
     // Save to Supabase
-    const leadId = await saveLead({ name, phone, industry: resolvedIndustry, blueprint, aiMessage, clientId });
+    const leadId = await saveLead({ name, phone, email, industry: resolvedIndustry, blueprint, aiMessage, clientId });
     console.log(`💾 Saved | ID: ${leadId}`);
 
     res.status(200).json({
