@@ -18,30 +18,32 @@ router.post("/lead", async (req, res) => {
       return res.status(400).json({ error: "Phone number is required" });
     }
     console.log(`\n⚡ Zapier lead: ${name} | ${phone} | ${email || "no email"} | ${industry} | client: ${clientId || "none"}`);
-    // Look up client record to get language + booking URL
+    // Look up client record to get language + booking URL + channel
     let resolvedIndustry = industry;
     let language = "en";
     let bookingUrl = "https://calendly.com/gustavoadade-1/qualyleads-demo-call";
+    let channel = "sms"; // default — existing clients stay on SMS
     if (clientId) {
       const supabase = (await import("../services/supabase.js")).default;
       const { data: client } = await supabase
         .from("clients")
-        .select("industry, booking_url, language")
+        .select("industry, booking_url, language, channel")
         .eq("id", clientId)
         .single();
       if (client?.industry) resolvedIndustry = client.industry;
       if (client?.language) language = client.language;
       if (client?.booking_url) bookingUrl = client.booking_url;
+      if (client?.channel) channel = client.channel; // "sms" or "whatsapp"
     }
     // Select blueprint based on industry AND language
     const blueprint = getBlueprint(resolvedIndustry, language);
-    console.log(`📋 Blueprint: ${blueprint.industry} | Language: ${language}`);
+    console.log(`📋 Blueprint: ${blueprint.industry} | Language: ${language} | Channel: ${channel}`);
     // Generate AI opener
     const aiMessage = await generateOpener({ name, industry: resolvedIndustry, blueprint, bookingUrl });
     console.log(`🤖 Message: "${aiMessage}"`);
-    // Send SMS via correct number based on language
-    await sendSMS({ to: phone, message: aiMessage, language });
-    // Save to Supabase (now includes email)
+    // Send SMS or WhatsApp based on client channel preference
+    await sendSMS({ to: phone, message: aiMessage, language, channel });
+    // Save to Supabase
     const leadId = await saveLead({ name, phone, email, industry: resolvedIndustry, blueprint, aiMessage, clientId });
     console.log(`💾 Saved | ID: ${leadId}`);
     res.status(200).json({
