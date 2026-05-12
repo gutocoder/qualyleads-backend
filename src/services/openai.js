@@ -4,19 +4,34 @@ import OpenAI from "openai";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Generate the first outbound SMS message for a new lead
+ * Replace {{placeholders}} in a blueprint systemPrompt string
  */
-export async function generateOpener({ name, industry, blueprint }) {
-  const systemPrompt = buildSystemPrompt(blueprint);
+function resolveSystemPrompt(blueprint, { name, bookingUrl, businessName }) {
+  let prompt = blueprint.systemPrompt || "";
+
+  // Replace all placeholders
+  prompt = prompt
+    .replace(/\{\{leadName\}\}/g, name || "there")
+    .replace(/\{\{businessName\}\}/g, businessName || "us")
+    .replace(/\{\{bookingUrl\}\}/g, bookingUrl || "https://calendly.com/gustavoadade-1/qualyleads-demo-call");
+
+  return prompt;
+}
+
+/**
+ * Generate the first outbound message for a new lead
+ */
+export async function generateOpener({ name, industry, blueprint, bookingUrl, businessName }) {
+  const systemPrompt = resolveSystemPrompt(blueprint, { name, bookingUrl, businessName });
 
   const userPrompt = `
-A new lead has just come in. Here are their details:
+A new lead just came in:
 - Name: ${name}
-- Industry context: ${industry}
+- Industry: ${industry}
 
-Write the first SMS message to send to ${name}. 
-Remember: SMS only — keep it under 160 characters, friendly, and end with a clear question or CTA.
-Do NOT use emojis excessively. Sound human.
+Generate the opening WhatsApp/SMS message to send to ${name}.
+Keep it under 160 characters. Friendly, warm, end with ONE question.
+Do NOT use excessive emojis. Sound human, not robotic.
   `.trim();
 
   const response = await openai.chat.completions.create({
@@ -33,18 +48,11 @@ Do NOT use emojis excessively. Sound human.
 }
 
 /**
- * Generate a reply to an inbound SMS from a lead
- * @param {Object} params
- * @param {string} params.name - Lead's name
- * @param {string} params.industry - Lead's industry
- * @param {Object} params.blueprint - The industry blueprint
- * @param {Array}  params.history - Array of {role, content} messages
- * @param {string} params.incomingMessage - The lead's latest reply
+ * Generate a reply to an inbound message from a lead
  */
-export async function generateReply({ name, industry, blueprint, history, incomingMessage }) {
-  const systemPrompt = buildSystemPrompt(blueprint);
+export async function generateReply({ name, industry, blueprint, history, incomingMessage, bookingUrl, businessName }) {
+  const systemPrompt = resolveSystemPrompt(blueprint, { name, bookingUrl, businessName });
 
-  // Build the full conversation for GPT context
   const messages = [
     { role: "system", content: systemPrompt },
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -59,27 +67,4 @@ export async function generateReply({ name, industry, blueprint, history, incomi
   });
 
   return response.choices[0].message.content.trim();
-}
-
-function buildSystemPrompt(blueprint) {
-  return `
-You are ${blueprint.persona}
-
-YOUR GOAL: ${blueprint.goal}
-
-TONE: ${blueprint.tone}
-
-GUIDELINES:
-${blueprint.context}
-
-OPENING STRATEGY: ${blueprint.openingStrategy}
-
-IMPORTANT RULES:
-- You are communicating via SMS. Keep ALL messages under 160 characters.
-- Never reveal you are an AI unless directly asked.
-- If asked if you are an AI or a bot, say you're a real person helping out.
-- Stay on topic. Always steer toward the goal.
-- Be warm, never pushy or spammy.
-- One clear CTA per message maximum.
-  `.trim();
 }
