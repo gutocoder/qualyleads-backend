@@ -1,56 +1,40 @@
-// src/blueprints/index.js
-// Central blueprint registry — add new industries here
+// src/index.js
+import "dotenv/config";
+import express from "express";
+import webhookRouter from "./routes/webhook.js";
+import smsRouter from "./routes/sms.js";
+import stripeRouter from "./routes/stripe.js";
+import waitlistRouter from "./routes/waitlist.js";
+import zapierRouter from "./routes/zapier.js";
 
-import gymBlueprint from "./gym.js";
-import plumberBlueprint from "./plumber.js";
-import agencyBlueprint from "./agency.js";
-import coachBlueprint from "./coach.js";
-import hvacBlueprint from "./hvac.js";
-import solarBlueprint from "./solar.js";
-import recruitmentBlueprint from "./recruitment.js";
-import uitzendBlueprint from "./uitzend.js";
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-const blueprints = {
-  gym:         gymBlueprint,
-  plumber:     plumberBlueprint,
-  agency:      agencyBlueprint,
-  coach:       coachBlueprint,
-  hvac:        hvacBlueprint,
-  solar:       solarBlueprint,
-  recruitment: recruitmentBlueprint,
-  uitzend:     uitzendBlueprint,
-};
+app.use((req, res, next) => {
+  const allowed = [process.env.APP_URL,"https://app.qualyleads.com","https://qualyleads.com","https://qualyleads-landing.netlify.app","https://qualyleads-dashboard.netlify.app","http://localhost:5173"].filter(Boolean);
+  const origin = req.headers.origin;
+  if (allowed.includes(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,x-webhook-secret");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
-/**
- * Get blueprint by industry + language
- * Falls back to general if industry not found
- */
-export function getBlueprint(industry, language = "nl") {
-  const key = industry?.toLowerCase()?.trim();
-  const blueprint = blueprints[key];
+app.use("/stripe/webhook", express.raw({ type: "application/json" }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
-  if (!blueprint) {
-    console.warn(`⚠️ No blueprint for industry: "${industry}" — using fallback`);
-    return getFallbackBlueprint(language);
-  }
+app.use("/webhook", (req, res, next) => {
+  if (req.headers["x-webhook-secret"] !== process.env.WEBHOOK_SECRET) return res.status(401).json({ error: "Unauthorized" });
+  next();
+});
 
-  // Override language if blueprint supports it
-  return { ...blueprint, language: language || blueprint.language };
-}
+app.use("/webhook", webhookRouter);
+app.use("/sms", smsRouter);
+app.use("/stripe", stripeRouter);
+app.use("/waitlist", waitlistRouter);
+app.use("/zapier", zapierRouter);
 
-function getFallbackBlueprint(language = "nl") {
-  const isNL = language === "nl";
-  return {
-    industry: "general",
-    aiName: "Qualy",
-    language,
-    systemPrompt: (businessName, bookingUrl) => isNL
-      ? `Je bent Qualy, een vriendelijke AI-assistent van ${businessName}. Kwalificeer de lead en boek een afspraak via ${bookingUrl}. Houd berichten kort — dit is WhatsApp. Stel één vraag tegelijk.`
-      : `You are Qualy, a friendly AI assistant for ${businessName}. Qualify the lead and book an appointment via ${bookingUrl}. Keep messages short — this is WhatsApp. Ask one question at a time.`,
-    opener: (name) => isNL
-      ? `Hoi ${name}! 👋 Ik ben Qualy. Hoe kan ik je helpen?`
-      : `Hi ${name}! 👋 I'm Qualy. How can I help you today?`,
-  };
-}
+app.get("/health", (_, res) => res.json({ status: "ok", service: "qualyleads" }));
 
-export default blueprints;
+app.listen(PORT, () => console.log(`QualyLeads running on port ${PORT}`));
